@@ -17,9 +17,9 @@ jobs:
           node-version: '18'
 
       - name: Install dependencies
-        run:
-            cd application-service/
-            npm init -y || true
-            npm install || true
-            npm ci  || true
-            npm test || true
+        working-directory: ./application-service
+        run: |
+          npm init -y
+          npm install
+          npm ci
+          npm test
