@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [ application-service, patient-service, appointment-service ] 
+        service: [ application-service/src, patient-service/src, appointment-service/src ] 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
