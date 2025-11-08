@@ -1,47 +1,71 @@
-name: CI
-
+name: Azure Container Deploy
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-
+env:
+  ACR_IMAGE_PREFIX: ${{ secrets.ACR_NAME }}
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [ application-service, patient-service, appointment-service ] 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-
-      - name: Install & test application-service (if package.json exists)
+      - name: Build & Test (per service)
         run: |
-          if [ -f application-service/package.json ]; then
-            cd application-service
+          if [ -f "${{ matrix.service }}/package.json" ]; then
+            cd "${{ matrix.service }}"
             npm ci
             npm test || true
             cd -
           else
-            echo "no package.json in application-service, skipping npm steps"
+            echo "no package.json in ${{ matrix.service }}, skipping npm steps"
           fi
-
-      - name: Install & test patient-service (if package.json exists)
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Resolve ACR login server
+        id: acr
         run: |
-          if [ -f patient-service/package.json ]; then
-            cd patient-service
-            npm ci
-            npm test || true
-            cd -
-          else
-            echo "no package.json in patient-service, skipping npm steps"
-          fi
-
-      - name: Build Docker image (optional)
-        if: always()
+          LOGIN_SERVER=$(az acr show -n "${{ secrets.ACR_NAME }}" --query loginServer -o tsv)
+          echo "ACR_LOGIN_SERVER=$LOGIN_SERVER" >> $GITHUB_ENV
+      - name: Build and push Docker image to ACR (per service)
+        uses: docker/build-push-action@v4
+        with:
+          context: .                       
+          file: ./Dockerfile               
+          build-args: |
+            SERVICE_DIR=${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest
+            ${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.sha }}
+      - name: Ensure resource group exists
         run: |
-          docker build -t hackathon-usecase:latest .
-# ...existing code...
+          az group create --name "${{ secrets.RESOURCE_GROUP }}" --location "${{ secrets.LOCATION }}"
+      - name: Deploy to Azure Container Instances (per service)
+        run: |
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest"
+          ACI_NAME="${{ secrets.ACI_NAME }}-${{ matrix.service }}"
+          DNS_LABEL="${{ secrets.DNS_NAME_LABEL }}-${{ matrix.service }}"
+          az container create \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --name "$ACI_NAME" \
+            --image "$IMAGE" \
+            --registry-login-server "${{ env.ACR_LOGIN_SERVER }}" \
+            --dns-name-label "$DNS_LABEL" \
+            --cpu 1 --memory 1.5 \
+            --ports 80 \
+            --query "id" -o tsv || \
+          az container restart --resource-group "${{ secrets.RESOURCE_GROUP }}" --name "$ACI_NAME"
+      - name: Output deployed URL
+        run: |
+          DNS="${{ secrets.DNS_NAME_LABEL }}-${{ matrix.service }}.${{ secrets.LOCATION }}.azurecontainer.io"
+          echo "Deployed ${matrix.service}: http://$DNS"
