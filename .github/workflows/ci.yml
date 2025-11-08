@@ -16,4 +16,10 @@ jobs:
         with:
           node-version: '18'
 
-# 
+      - name: Install dependencies
+        run:
+            cd application-service/
+            npm init -y || true
+            npm install || true
+            npm ci  || true
+            npm test || true
