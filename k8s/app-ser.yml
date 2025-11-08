@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: application-service
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: application-service
+  template:
+    metadata:
+      labels:
+        app: application-service
+    spec:
+      containers:
+      - name: application-service
+        image: ${ACR_SERVER}/application-service:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: application-service
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+  selector:
+    app: application-service
